@@ -1,0 +1,1 @@
+# samsung_android_kernel_a52xq
