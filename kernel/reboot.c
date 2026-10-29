@@ -16,12 +16,13 @@
 #include <linux/syscalls.h>
 #include <linux/syscore_ops.h>
 #include <linux/uaccess.h>
+#include <linux/susfs_def.h>
 
 /*
  * this indicates whether you can reboot with ctrl-alt-del: the default is yes
  */
 
-#ifdef CONFIG_KSU
+#ifdef CONFIG_KSU_SUSFS
 extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
 #endif
 
@@ -317,8 +318,9 @@ DEFINE_MUTEX(system_transition_mutex);
 SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		void __user *, arg)
 {
-#ifdef CONFIG_KSU
-	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
+#ifdef CONFIG_KSU_SUSFS
+	if (system_state == SYSTEM_RUNNING)
+		ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
 #endif
 
 	struct pid_namespace *pid_ns = task_active_pid_ns(current);

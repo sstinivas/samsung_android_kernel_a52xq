@@ -34,6 +34,21 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs_def.h>
+extern struct static_key_true ksu_su_compat_enabled;
+extern bool __ksu_is_allow_uid_for_current(uid_t uid);
+extern int ksu_handle_faccessat(int *dfd, struct filename **filename, int *mode,
+			int *flags);
+extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
+				struct path *path, struct path *root);
+#endif
+
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+extern bool susfs_open_redirect_has_rules;
+extern struct filename *susfs_open_redirect_spoof_do_sys_openat(struct inode *inode);
+#endif
+
 #ifdef CONFIG_SECURITY_DEFEX
 #include <linux/defex.h>
 #endif
@@ -367,6 +382,9 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 	int res;
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 
+#ifdef CONFIG_KSU_SUSFS
+	struct filename *fname = NULL;
+#endif
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
 		return -EINVAL;
 
@@ -408,7 +426,23 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 
 	old_cred = override_creds(override_cred);
 retry:
+#ifdef CONFIG_KSU_SUSFS
+	fname = getname_flags(filename, lookup_flags, NULL);
+
+	if (likely(susfs_is_current_proc_no_su()))
+		goto orig_flow;
+
+	if (static_branch_likely(&ksu_su_compat_enabled)) {
+		if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val)))
+			ksu_handle_faccessat(&dfd, &fname, &mode, NULL);
+	}
+
+orig_flow:
+	res = filename_lookup(dfd, fname, lookup_flags, &path, NULL);
+	// no putname(fname) here as filename_lookup() has it done for us already;
+#else
 	res = user_path_at(dfd, filename, lookup_flags, &path);
+#endif
 	if (res)
 		goto out;
 
@@ -454,16 +488,9 @@ out:
 	return res;
 }
 
-#ifdef CONFIG_KSU
-extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
-			                    int *flags);
-#endif
 
 SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 {
-#ifdef CONFIG_KSU
-	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-#endif
 	return do_faccessat(dfd, filename, mode);
 }
 
@@ -1105,6 +1132,60 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 		return PTR_ERR(tmp);
 
 	fd = get_unused_fd_flags(flags);
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	if (fd < 0) {
+		putname(tmp);
+		return fd;
+	}
+
+	if (unlikely(smp_load_acquire(&susfs_open_redirect_has_rules))) {
+		struct filename *lookup_name, *redirect_name = NULL;
+		struct path lookup_path;
+		int lookup_err;
+
+		/* Check the original inode before any open/truncate side effects. */
+		lookup_name = getname_kernel(tmp->name);
+		if (IS_ERR(lookup_name)) {
+			lookup_err = PTR_ERR(lookup_name);
+			put_unused_fd(fd);
+			putname(tmp);
+			return lookup_err;
+		}
+		/* filename_lookup() consumes lookup_name, including on failure. */
+		lookup_err = filename_lookup(dfd, lookup_name, op.lookup_flags,
+					     &lookup_path, NULL);
+		if (!lookup_err) {
+			struct inode *inode = d_backing_inode(lookup_path.dentry);
+
+			if (SUSFS_IS_INODE_OPEN_REDIRECT_WITHOUT_UID_CHECK(inode))
+				redirect_name = susfs_open_redirect_spoof_do_sys_openat(inode);
+			path_put(&lookup_path);
+			if (IS_ERR(redirect_name)) {
+				lookup_err = PTR_ERR(redirect_name);
+				put_unused_fd(fd);
+				putname(tmp);
+				return lookup_err;
+			}
+			if (redirect_name) {
+				/* An existing source still obeys exclusive creation. */
+				if ((op.open_flag & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
+					putname(redirect_name);
+					put_unused_fd(fd);
+					putname(tmp);
+					return -EEXIST;
+				}
+				putname(tmp);
+				tmp = redirect_name;
+			}
+		} else if (lookup_err != -ENOENT) {
+			/* Do not open the source if the safety lookup failed. */
+			put_unused_fd(fd);
+			putname(tmp);
+			return lookup_err;
+		}
+	}
+#endif
+
 	if (fd >= 0) {
 		struct file *f = do_filp_open(dfd, tmp, &op);
 #ifdef CONFIG_SECURITY_DEFEX

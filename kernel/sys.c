@@ -75,7 +75,6 @@
 
 #ifdef CONFIG_KSU
 extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
-extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
 #endif
 
 #ifdef CONFIG_SECURITY_DEFEX
@@ -699,8 +698,10 @@ error:
 
 SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 {
-#ifdef CONFIG_KSU
-   ksu_handle_setresuid(ruid, euid, suid);
+#ifdef CONFIG_KSU_SUSFS
+	if (ksu_handle_setresuid(ruid, euid, suid)) {
+		pr_info("Something wrong with ksu_handle_setresuid()\n");
+	}
 #endif
 	return __sys_setresuid(ruid, euid, suid);
 
@@ -1263,12 +1264,20 @@ static int override_release(char __user *release, size_t len)
 	return ret;
 }
 
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+extern struct static_key_false susfs_is_uname_spoof_buffer_set;
+extern void susfs_spoof_uname(struct new_utsname *tmp);
+#endif
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 {
 	struct new_utsname tmp;
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	if (static_branch_likely(&susfs_is_uname_spoof_buffer_set))
+		susfs_spoof_uname(&tmp);
+#endif
 	if (!strncmp(current->comm, "bpfloader", 9) ||
 	    !strncmp(current->comm, "netbpfload", 10) ||
 	    !strncmp(current->comm, "netd", 4)) {

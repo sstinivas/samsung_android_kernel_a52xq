@@ -324,4 +324,36 @@ source "fs/nls/Kconfig"
 source "fs/dlm/Kconfig"
 source "fs/unicode/Kconfig"
 
+source "fs/nomount/Kconfig"
 endmenu
+
+
+config KSU_SUSFS_SUS_KSTAT_REDIRECT
+    bool "SUSFS kstat redirect"
+    depends on KSU_SUSFS_SUS_KSTAT
+    default y
+    help
+      Redirects kstat lookups to real file metadata for spoofed paths.
+
+config KSU_SUSFS_UNICODE_FILTER
+    bool "Unicode Filter (blocks scoped storage bypass)"
+    depends on KSU_SUSFS
+    default y
+    help
+      Blocks filesystem path attacks using unicode characters.
+
+config KSU_SUSFS_HIDDEN_NAME
+    bool "Hidden Android/data package names"
+    depends on KSU_SUSFS_SUS_PATH
+    default y
+    help
+      Auto-hides Android/data and Android/obb package directories
+      from other apps via hash-table lookup at stat/open/readdir.
+
+config KSU_SUSFS_HARDENED
+    bool "Hardened SUSFS (upstream bug fixes)"
+    depends on KSU_SUSFS
+    default y
+    help
+      Fixes upstream SUSFS concurrency and error-handling bugs.
+      Disable to match exact upstream behavior.

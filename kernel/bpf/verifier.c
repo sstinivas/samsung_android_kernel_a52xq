@@ -5513,10 +5513,6 @@ static bool range_within(struct bpf_reg_state *old,
 
 /* Maximum number of register states that can exist at once */
 #define ID_MAP_SIZE	(MAX_BPF_REG + MAX_BPF_STACK / BPF_REG_SIZE)
-struct idpair {
-	u32 old;
-	u32 cur;
-};
 
 /* If in the old state two registers had the same id, then they need to have
  * the same id in the new state as well.  But that id could be different from
@@ -5528,7 +5524,7 @@ struct idpair {
  * So we look through our idmap to see if this old id has been seen before.  If
  * so, we require the new id to match; otherwise, we add the id pair to the map.
  */
-static bool check_ids(u32 old_id, u32 cur_id, struct idpair *idmap)
+static bool check_ids(u32 old_id, u32 cur_id, struct bpf_id_pair *idmap)
 {
 	unsigned int i;
 

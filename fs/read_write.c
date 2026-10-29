@@ -618,6 +618,7 @@ ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 
 
 #ifdef CONFIG_KSU
+extern struct static_key_true ksu_is_init_rc_hook_enabled;
 extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr,
 			size_t *count_ptr);
 #endif
@@ -625,7 +626,8 @@ extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr,
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 {
 #ifdef CONFIG_KSU
-	ksu_handle_sys_read(fd, &buf, &count);
+	if (static_branch_unlikely(&ksu_is_init_rc_hook_enabled))
+		ksu_handle_sys_read(fd, &buf, &count);
 #endif
 	return ksys_read(fd, buf, count);
 }

@@ -8,6 +8,7 @@
 #include <linux/prefetch.h>
 #include "mount.h"
 
+
 static int prepend(char **buffer, int *buflen, const char *str, int namelen)
 {
 	*buflen -= namelen;
@@ -263,6 +264,8 @@ char *d_path(const struct path *path, char *buf, int buflen)
 	char *res = buf + buflen;
 	struct path root;
 	int error;
+
+
 
 	/*
 	 * We have various synthetic filesystems that never get mounted.  On
